@@ -53,7 +53,7 @@ def main(args):
     camera_names = task_config["camera_names"]
 
     # fixed parameters # TODO: Get this info from Config, remove script vars.
-    state_dim = 7
+    state_dim = 14
     lr_backbone = 1e-5
     backbone = "resnet18"
     enc_layers = 4
@@ -203,7 +203,6 @@ def eval_bc(config, ckpt_name, save_episode=True):
                 [max_timesteps, max_timesteps + num_queries, state_dim]
             ).cuda()
 
-        qpos_history = torch.zeros((1, max_timesteps, state_dim)).cuda()
         image_list = []  # for visualization
         qpos_list = []
         target_qpos_list = []
@@ -227,7 +226,6 @@ def eval_bc(config, ckpt_name, save_episode=True):
                 qpos_numpy = np.array(obs["qpos"])
                 qpos = pre_process(qpos_numpy)
                 qpos = torch.from_numpy(qpos).float().cuda().unsqueeze(0)
-                qpos_history[:, t] = qpos
                 curr_image = get_image(ts, camera_names)
 
                 if t % query_frequency == 0:
@@ -314,7 +312,7 @@ def forward_pass(data, policy):
         action_data.cuda(),
         is_pad.cuda(),
     )
-    return policy(qpos_data, image_data, action_data, is_pad)  # TODO remove None
+    return policy(qpos_data, image_data, action_data, is_pad)
 
 
 def train_bc(train_dataloader, val_dataloader, config):
@@ -333,8 +331,8 @@ def train_bc(train_dataloader, val_dataloader, config):
     validation_history = []
     min_val_loss = np.inf
     best_ckpt_info = None
-    for epoch in tqdm(range(num_epochs)):
-        print(f"\nEpoch {epoch}")
+    ebar = tqdm(range(num_epochs))
+    for epoch in ebar:
         # validation
         with torch.inference_mode():
             policy.eval()
@@ -349,11 +347,11 @@ def train_bc(train_dataloader, val_dataloader, config):
             if epoch_val_loss < min_val_loss:
                 min_val_loss = epoch_val_loss
                 best_ckpt_info = (epoch, min_val_loss, deepcopy(policy.state_dict()))
-        print(f"Val loss:   {epoch_val_loss:.5f}")
+        ebar.set_description(f"Val loss:   {epoch_val_loss:.5f}")
         summary_string = ""
         for k, v in epoch_summary.items():
             summary_string += f"{k}: {v.item():.3f} "
-        print(summary_string)
+        # print(summary_string)
 
         # training
         policy.train()
@@ -370,11 +368,11 @@ def train_bc(train_dataloader, val_dataloader, config):
             train_history[(batch_idx + 1) * epoch : (batch_idx + 1) * (epoch + 1)]
         )
         epoch_train_loss = epoch_summary["loss"]
-        print(f"Train loss: {epoch_train_loss:.5f}")
+        ebar.set_description(f"Train loss: {epoch_train_loss:.5f}")
         summary_string = ""
         for k, v in epoch_summary.items():
             summary_string += f"{k}: {v.item():.3f} "
-        print(summary_string)
+        # print(summary_string)
 
         if epoch % 100 == 0:
             ckpt_path = os.path.join(ckpt_dir, f"policy_epoch_{epoch}_seed_{seed}.ckpt")
@@ -419,7 +417,7 @@ def plot_history(train_history, validation_history, num_epochs, ckpt_dir, seed):
         plt.legend()
         plt.title(key)
         plt.savefig(plot_path)
-    print(f"Saved plots to {ckpt_dir}")
+    # print(f"Saved plots to {ckpt_dir}")
 
 
 if __name__ == "__main__":
