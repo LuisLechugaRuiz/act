@@ -13,13 +13,16 @@ class ACTPolicy(nn.Module):
         self.kl_weight = args_override['kl_weight']
         print(f'KL Weight {self.kl_weight}')
 
-    def __call__(self, qpos, image, actions=None, is_pad=None):
-        image = self.custom_normalize(image)
+    def __call__(self, qpos, history, is_pad_history, image, actions=None, is_pad=None):
+        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                         std=[0.229, 0.224, 0.225])
+        image = normalize(image)
+        # image = self.custom_normalize(image) TODO: Enable after fix
         if actions is not None: # training time
             actions = actions[:, :self.model.num_queries]
             is_pad = is_pad[:, :self.model.num_queries]
 
-            a_hat, is_pad_hat, (mu, logvar) = self.model(qpos, image, actions, is_pad)
+            a_hat, is_pad_hat, (mu, logvar) = self.model(qpos, history, is_pad_history, image, actions, is_pad)
             total_kld, dim_wise_kld, mean_kld = self.kl_divergence(mu, logvar)
             loss_dict = dict()
             all_l1 = F.l1_loss(actions, a_hat, reduction='none')
@@ -29,7 +32,7 @@ class ACTPolicy(nn.Module):
             loss_dict['loss'] = loss_dict['l1'] + loss_dict['kl'] * self.kl_weight
             return loss_dict
         else: # inference time
-            a_hat, _, (_, _) = self.model(qpos, image) # no action, sample from prior
+            a_hat, _, (_, _) = self.model(qpos, history, is_pad_history, image) # no action, sample from prior
             return a_hat
 
     def custom_normalize(self, image):

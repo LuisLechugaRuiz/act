@@ -47,12 +47,13 @@ class Transformer(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def forward(self, src, mask, query_embed, pos_embed, latent_input=None, proprio_input=None, additional_pos_embed=None):
+    def forward(self, src, mask, query_embed, pos_embed, history_input, additional_history_embed, is_pad_history, latent_input=None, proprio_input=None, additional_pos_embed=None):
         if len(src.shape) == 4: # has H and W
             # flatten NxCxHxW to HWxNxC
             bs, c, h, w = src.shape
             src = src.flatten(2).permute(2, 0, 1)
             pos_embed = pos_embed.flatten(2).permute(2, 0, 1).repeat(1, bs, 1)
+            src_pad = torch.full((h*w, bs), False, device=is_pad_history.device)
             # mask = mask.flatten(1)
         else:
             assert len(src.shape) == 3
@@ -60,18 +61,26 @@ class Transformer(nn.Module):
             bs, hw, c = src.shape
             src = src.permute(1, 0, 2)
             pos_embed = pos_embed.permute(1, 0, 2)
+            src_pad = torch.full((hw, bs), False, device=is_pad_history.device)
 
         additional_pos_embed = additional_pos_embed.unsqueeze(1).repeat(1, bs, 1) # seq, bs, dim
-        pos_embed = torch.cat([additional_pos_embed, pos_embed], axis=0)
+        additional_history_embed = additional_history_embed.unsqueeze(1).repeat(1, bs, 1) # seq, bs, dim
+        pos_embed = torch.cat([additional_pos_embed, additional_history_embed, pos_embed], axis=0)
 
         addition_input = torch.stack([latent_input, proprio_input], axis=0)
-        src = torch.cat([addition_input, src], axis=0)
+        addition_input_pad = torch.full((2, bs), False, device=is_pad_history.device)
 
-        memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed)
+        history_input_pad = is_pad_history.squeeze(-1).t()
+
+        src = torch.cat([addition_input, history_input, src], axis=0)
+        is_pad = torch.cat([addition_input_pad, history_input_pad, src_pad], axis=0)
+        is_pad = is_pad.transpose(1, 0)
+
+        memory = self.encoder(src, src_key_padding_mask=is_pad, pos=pos_embed)
 
         query_embed = query_embed.unsqueeze(1).repeat(1, bs, 1)
         tgt = torch.zeros_like(query_embed)
-        hs = self.decoder(tgt, memory, memory_key_padding_mask=mask,
+        hs = self.decoder(tgt, memory, memory_key_padding_mask=is_pad,
                           pos=pos_embed, query_pos=query_embed)
         hs = hs.transpose(1, 2)
         return hs
