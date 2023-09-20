@@ -34,7 +34,6 @@ class CVAE(nn.Module):
         self.input_proj = nn.Conv2d(backbones[0].num_channels, hidden_dim, kernel_size=1)
         self.backbones = nn.ModuleList(backbones)
         self.input_proj_robot_state = nn.Linear(state_dim, hidden_dim)
-        self.input_proj_robot_state_history = nn.Linear(state_dim, hidden_dim)
 
         # encoder extra parameters
         self.latent_dim = 32 # final size of latent z # TODO tune
@@ -47,13 +46,10 @@ class CVAE(nn.Module):
         # decoder extra parameters
         self.latent_out_proj = nn.Linear(self.latent_dim, hidden_dim) # project latent sample to embedding
         self.additional_pos_embed = nn.Embedding(2, hidden_dim) # learned position embedding for proprio and latent
-        self.additional_history_embed = nn.Embedding(2, hidden_dim) # learned position embedding for history TODO: TUNE!
 
-    def forward(self, qpos, history, is_pad_history, image, actions=None, is_pad=None):
+    def forward(self, qpos, image, actions=None, is_pad=None):
         """
         qpos: batch, qpos_dim
-        history: batch, seq, qpos_dim
-        is_pad_history: batch, seq, 1
         image: batch, num_cam, channel, height, width
         actions: batch, seq, action_dim
         is_pad: batch, seq, 1
@@ -100,13 +96,10 @@ class CVAE(nn.Module):
             all_cam_pos.append(pos)
         # proprioception features
         proprio_input = self.input_proj_robot_state(qpos)
-        # history features
-        history_input = self.input_proj_robot_state_history(history)
-        history_input = history_input.permute(1, 0, 2)  # (seq, bs, hidden_dim)
         # fold camera dimension into width dimension
         src = torch.cat(all_cam_features, axis=3)
         pos = torch.cat(all_cam_pos, axis=3)
-        hs = self.transformer(src, None, self.query_embed.weight, pos, history_input, self.additional_history_embed.weight, is_pad_history, latent_input, proprio_input, self.additional_pos_embed.weight)[0]
+        hs = self.transformer(src, None, self.query_embed.weight, pos, latent_input, proprio_input, self.additional_pos_embed.weight)[0]
         a_hat = self.action_head(hs)
         is_pad_hat = self.is_pad_head(hs)
         return a_hat, is_pad_hat, [mu, logvar]

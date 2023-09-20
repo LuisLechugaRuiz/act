@@ -169,7 +169,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
         env = make_sim_env(task_name)
         env_max_reward = env.task.max_reward
 
-    query_frequency = 4
+    query_frequency = policy_config["num_queries"]
     if temporal_agg:
         query_frequency = 1
         num_queries = policy_config["num_queries"]
@@ -203,8 +203,6 @@ def eval_bc(config, ckpt_name, save_episode=True):
                 [max_timesteps, max_timesteps + num_queries, state_dim]
             ).cuda()
 
-        qpos_history = torch.zeros(1, max_timesteps, state_dim).cuda()
-        is_pad_history = torch.ones(1, max_timesteps).cuda()
         image_list = []  # for visualization
         qpos_list = []
         target_qpos_list = []
@@ -231,7 +229,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
                 curr_image = get_image(ts, camera_names)
 
                 if t % query_frequency == 0:
-                    all_actions = policy(qpos, qpos_history, is_pad_history, curr_image)
+                    all_actions = policy(qpos, curr_image)
                 if temporal_agg:
                     all_time_actions[[t], t : t + num_queries] = all_actions
                     actions_for_curr_step = all_time_actions[:, t]
@@ -246,16 +244,6 @@ def eval_bc(config, ckpt_name, save_episode=True):
                     )
                 else:
                     raw_action = all_actions[:, t % query_frequency]
-                # print("DEBUG ALL ACTIONS:", all_actions)
-                # print("DEBUG RAW ACTION:", raw_action)
-
-                ### Update qpos history
-                # print("DEBUG - QPOS:", qpos)
-                # print("DEBUG HISTORY:", qpos_history[0])
-                qpos_history[0] = torch.roll(qpos_history[0], shifts=-1, dims=0)
-                is_pad_history = torch.roll(is_pad_history, shifts=-1)
-                qpos_history[0][-1] = qpos
-                is_pad_history[0][-1] = 0
 
                 ### post-process actions
                 raw_action = raw_action.squeeze(0).cpu().numpy()
@@ -317,16 +305,14 @@ def eval_bc(config, ckpt_name, save_episode=True):
 
 
 def forward_pass(data, policy):
-    image_data, qpos_data, history_data, is_pad_history, action_data, is_pad = data
-    image_data, qpos_data, history_data, is_pad_history, action_data, is_pad = (
+    image_data, qpos_data, action_data, is_pad = data
+    image_data, qpos_data, action_data, is_pad = (
         image_data.cuda(),
         qpos_data.cuda(),
-        history_data.cuda(),
-        is_pad_history.cuda(),
         action_data.cuda(),
         is_pad.cuda(),
     )
-    return policy(qpos_data, history_data, is_pad_history, image_data, action_data, is_pad)
+    return policy(qpos_data, image_data, action_data, is_pad)
 
 
 def train_bc(train_dataloader, val_dataloader, config):

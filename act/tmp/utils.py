@@ -33,7 +33,6 @@ class EpisodicDataset(torch.utils.data.Dataset):
         with h5py.File(dataset_path, 'r') as root:
             is_sim = root.attrs['sim']
             original_action_shape = root['/action'].shape
-            original_qpos_shape = root['/observations/qpos'].shape
             episode_len = original_action_shape[0]
             if sample_full_episode:
                 start_ts = 0
@@ -51,16 +50,6 @@ class EpisodicDataset(torch.utils.data.Dataset):
             else:
                 action = root['/action'][max(0, start_ts - 1):] # hack, to make timesteps more aligned
                 action_len = episode_len - max(0, start_ts - 1) # hack, to make timesteps more aligned
-            history = root['/observations/qpos'][:start_ts]
-
-        padded_history = np.zeros(original_qpos_shape, dtype=np.float32)
-        if history.shape[0] == 0:
-            # Don't update history and set is_pad_history to ones.
-            is_pad_history = np.ones(episode_len)
-        else:
-            padded_history[-len(history):] = history
-            is_pad_history = np.zeros(episode_len)
-            is_pad_history[:-len(history)] = 1
 
         self.is_sim = is_sim
         padded_action = np.zeros(original_action_shape, dtype=np.float32)
@@ -77,8 +66,6 @@ class EpisodicDataset(torch.utils.data.Dataset):
         # construct observations
         image_data = torch.from_numpy(all_cam_images)
         qpos_data = torch.from_numpy(qpos).float()
-        history_data = torch.from_numpy(padded_history).float()
-        is_pad_history = torch.from_numpy(is_pad_history).bool()
         action_data = torch.from_numpy(padded_action).float()
         is_pad = torch.from_numpy(is_pad).bool()
 
@@ -89,9 +76,8 @@ class EpisodicDataset(torch.utils.data.Dataset):
         image_data = image_data / 255.0
         action_data = (action_data - self.norm_stats["action_mean"]) / self.norm_stats["action_std"]
         qpos_data = (qpos_data - self.norm_stats["qpos_mean"]) / self.norm_stats["qpos_std"]
-        history_data = (history_data - self.norm_stats["qpos_mean"]) / self.norm_stats["qpos_std"]
 
-        return image_data, qpos_data, history_data, is_pad_history, action_data, is_pad
+        return image_data, qpos_data, action_data, is_pad
 
 
 def get_norm_stats(dataset_dir, num_episodes):
