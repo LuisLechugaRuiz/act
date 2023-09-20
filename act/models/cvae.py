@@ -47,7 +47,7 @@ class CVAE(nn.Module):
         # decoder extra parameters
         self.latent_out_proj = nn.Linear(self.latent_dim, hidden_dim) # project latent sample to embedding
         self.additional_pos_embed = nn.Embedding(2, hidden_dim) # learned position embedding for proprio and latent
-        self.additional_history_embed = nn.Embedding(num_queries, hidden_dim) # learned position embedding for history !! THIS FORCES HISTORY == NUM QUERIES !!
+        self.additional_history_embed = nn.Embedding(2, hidden_dim) # learned position embedding for history TODO: TUNE!
 
     def forward(self, qpos, history, is_pad_history, image, actions=None, is_pad=None):
         """

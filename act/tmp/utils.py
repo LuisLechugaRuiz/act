@@ -33,29 +33,37 @@ class EpisodicDataset(torch.utils.data.Dataset):
         with h5py.File(dataset_path, 'r') as root:
             is_sim = root.attrs['sim']
             original_action_shape = root['/action'].shape
+            original_qpos_shape = root['/observations/qpos'].shape
             episode_len = original_action_shape[0]
             if sample_full_episode:
                 start_ts = 0
             else:
                 start_ts = np.random.choice(episode_len)
             # get observation at start_ts only
-            qpos = root['/observations/qpos'][start_ts, 7:]
-            # qpos = root['/observations/qpos'][start_ts] -> PREVIOUS CODE!
+            qpos = root['/observations/qpos'][start_ts]
             image_dict = dict()
             for cam_name in self.camera_names:
                 image_dict[cam_name] = root[f'/observations/images/{cam_name}'][start_ts]
             # get all actions after and including start_ts
             if is_sim:
-                action = root['/action'][start_ts:, 7:]  # Slice to get the last 7 dimensions
-                # action = root['/action'][start_ts:] -> PREVIOUS CODE! Previous 14 dim action (2 manipulators)
+                action = root['/action'][start_ts:]
                 action_len = episode_len - start_ts
             else:
                 action = root['/action'][max(0, start_ts - 1):] # hack, to make timesteps more aligned
                 action_len = episode_len - max(0, start_ts - 1) # hack, to make timesteps more aligned
+            history = root['/observations/qpos'][:start_ts]
+
+        padded_history = np.zeros(original_qpos_shape, dtype=np.float32)
+        if history.shape[0] == 0:
+            # Don't update history and set is_pad_history to ones.
+            is_pad_history = np.ones(episode_len)
+        else:
+            padded_history[-len(history):] = history
+            is_pad_history = np.zeros(episode_len)
+            is_pad_history[:-len(history)] = 1
 
         self.is_sim = is_sim
-        padded_action = np.zeros((original_action_shape[0], 7), dtype=np.float32)  # Change the second dimension to 7
-        # padded_action = np.zeros(original_action_shape, dtype=np.float32) -> PREVIOUS CODE! Original 14 dim action
+        padded_action = np.zeros(original_action_shape, dtype=np.float32)
         padded_action[:action_len] = action
         is_pad = np.zeros(episode_len)
         is_pad[action_len:] = 1
@@ -69,6 +77,8 @@ class EpisodicDataset(torch.utils.data.Dataset):
         # construct observations
         image_data = torch.from_numpy(all_cam_images)
         qpos_data = torch.from_numpy(qpos).float()
+        history_data = torch.from_numpy(padded_history).float()
+        is_pad_history = torch.from_numpy(is_pad_history).bool()
         action_data = torch.from_numpy(padded_action).float()
         is_pad = torch.from_numpy(is_pad).bool()
 
@@ -79,8 +89,9 @@ class EpisodicDataset(torch.utils.data.Dataset):
         image_data = image_data / 255.0
         action_data = (action_data - self.norm_stats["action_mean"]) / self.norm_stats["action_std"]
         qpos_data = (qpos_data - self.norm_stats["qpos_mean"]) / self.norm_stats["qpos_std"]
+        history_data = (history_data - self.norm_stats["qpos_mean"]) / self.norm_stats["qpos_std"]
 
-        return image_data, qpos_data, action_data, is_pad
+        return image_data, qpos_data, history_data, is_pad_history, action_data, is_pad
 
 
 def get_norm_stats(dataset_dir, num_episodes):
@@ -89,9 +100,9 @@ def get_norm_stats(dataset_dir, num_episodes):
     for episode_idx in range(num_episodes):
         dataset_path = os.path.join(dataset_dir, f'episode_{episode_idx}.hdf5')
         with h5py.File(dataset_path, 'r') as root:
-            qpos = root['/observations/qpos'][:, 7:]
-            qvel = root['/observations/qvel'][:, 7:]
-            action = root['/action'][:, 7:]
+            qpos = root['/observations/qpos'][()]
+            qvel = root['/observations/qvel'][()]
+            action = root['/action'][()]
         all_qpos_data.append(torch.from_numpy(qpos))
         all_action_data.append(torch.from_numpy(action))
     all_qpos_data = torch.stack(all_qpos_data)

@@ -47,7 +47,7 @@ class Transformer(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def forward(self, src, mask, query_embed, pos_embed, history_input, additional_history_embed, is_pad_history, latent_input=None, proprio_input=None, additional_pos_embed=None):
+    def forward(self, src, mask, query_embed, pos_embed, history_input, additional_history_pos_embed, is_pad_history, latent_input=None, proprio_input=None, additional_pos_embed=None):
         if len(src.shape) == 4: # has H and W
             # flatten NxCxHxW to HWxNxC
             bs, c, h, w = src.shape
@@ -64,14 +64,13 @@ class Transformer(nn.Module):
             src_pad = torch.full((hw, bs), False, device=is_pad_history.device)
 
         additional_pos_embed = additional_pos_embed.unsqueeze(1).repeat(1, bs, 1) # seq, bs, dim
-        additional_history_embed = additional_history_embed.unsqueeze(1).repeat(1, bs, 1) # seq, bs, dim
-        pos_embed = torch.cat([additional_pos_embed, additional_history_embed, pos_embed], axis=0)
+        history_pos_embed = additional_history_pos_embed.unsqueeze(1).repeat(1, bs, 1) # seq, bs, dim
+        pos_embed = torch.cat([additional_pos_embed, history_pos_embed, pos_embed], axis=0)
 
         addition_input = torch.stack([latent_input, proprio_input], axis=0)
         addition_input_pad = torch.full((2, bs), False, device=is_pad_history.device)
 
         history_input_pad = is_pad_history.squeeze(-1).t()
-
         src = torch.cat([addition_input, history_input, src], axis=0)
         is_pad = torch.cat([addition_input_pad, history_input_pad, src_pad], axis=0)
         is_pad = is_pad.transpose(1, 0)

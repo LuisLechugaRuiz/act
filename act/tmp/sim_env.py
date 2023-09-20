@@ -6,7 +6,7 @@ from dm_control import mujoco
 from dm_control.rl import control
 from dm_control.suite import base
 
-from act.tmp.constants import DT, XML_DIR, FIXED_LEFT_ARM_POSE, FIXED_LEFT_GRIPPER_POSE, START_ARM_POSE
+from act.tmp.constants import DT, XML_DIR, START_ARM_POSE
 from act.tmp.constants import PUPPET_GRIPPER_POSITION_UNNORMALIZE_FN
 from act.tmp.constants import MASTER_GRIPPER_POSITION_NORMALIZE_FN
 from act.tmp.constants import PUPPET_GRIPPER_POSITION_NORMALIZE_FN
@@ -56,10 +56,10 @@ class BimanualViperXTask(base.Task):
         super().__init__(random=random)
 
     def before_step(self, action, physics):
-        left_arm_action = FIXED_LEFT_ARM_POSE
-        right_arm_action = action[:6]
-        normalized_left_gripper_action = FIXED_LEFT_GRIPPER_POSE
-        normalized_right_gripper_action = action[6]
+        left_arm_action = action[:6]
+        right_arm_action = action[7:7+6]
+        normalized_left_gripper_action = action[6]
+        normalized_right_gripper_action = action[7+6]
 
         left_gripper_action = PUPPET_GRIPPER_POSITION_UNNORMALIZE_FN(normalized_left_gripper_action)
         right_gripper_action = PUPPET_GRIPPER_POSITION_UNNORMALIZE_FN(normalized_right_gripper_action)
@@ -103,8 +103,8 @@ class BimanualViperXTask(base.Task):
 
     def get_observation(self, physics):
         obs = collections.OrderedDict()
-        obs['qpos'] = self.get_qpos(physics)[7:]
-        obs['qvel'] = self.get_qvel(physics)[7:]
+        obs['qpos'] = self.get_qpos(physics)
+        obs['qvel'] = self.get_qvel(physics)
         obs['env_state'] = self.get_env_state(physics)
         obs['images'] = dict()
         obs['images']['top'] = physics.render(height=480, width=640, camera_id='top')
@@ -121,7 +121,7 @@ class BimanualViperXTask(base.Task):
 class TransferCubeTask(BimanualViperXTask):
     def __init__(self, random=None):
         super().__init__(random=random)
-        self.max_reward = 2
+        self.max_reward = 4
 
     def initialize_episode(self, physics):
         """Sets the state of the environment at the start of each episode."""
@@ -151,7 +151,7 @@ class TransferCubeTask(BimanualViperXTask):
             contact_pair = (name_geom_1, name_geom_2)
             all_contact_pairs.append(contact_pair)
 
-        # touch_left_gripper = ("red_box", "vx300s_left/10_left_gripper_finger") in all_contact_pairs
+        touch_left_gripper = ("red_box", "vx300s_left/10_left_gripper_finger") in all_contact_pairs
         touch_right_gripper = ("red_box", "vx300s_right/10_right_gripper_finger") in all_contact_pairs
         touch_table = ("red_box", "table") in all_contact_pairs
 
@@ -160,10 +160,10 @@ class TransferCubeTask(BimanualViperXTask):
             reward = 1
         if touch_right_gripper and not touch_table: # lifted
             reward = 2
-        # if touch_left_gripper: # attempted transfer
-        #    reward = 3
-        # if touch_left_gripper and not touch_table: # successful transfer
-        #    reward = 4
+        if touch_left_gripper: # attempted transfer
+            reward = 3
+        if touch_left_gripper and not touch_table: # successful transfer
+            reward = 4
         return reward
 
 
@@ -230,7 +230,7 @@ class InsertionTask(BimanualViperXTask):
 
 
 def get_action(master_bot_left, master_bot_right):
-    action = np.zeros(7) # Prev 14
+    action = np.zeros(14)
     # arm action
     action[:6] = master_bot_left.dxl.joint_states.position[:6]
     action[7:7+6] = master_bot_right.dxl.joint_states.position[:6]
@@ -275,4 +275,3 @@ def test_sim_teleop():
 
 if __name__ == '__main__':
     test_sim_teleop()
-

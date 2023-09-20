@@ -10,7 +10,7 @@
     "enc_layers": 4,
     "dec_layers": 7,
     "dim_feedforward": 3200,
-    "hidden_dim": 256,
+    "hidden_dim": 512,
     "dropout": 0.1,
     "nheads": 8,
     "pre_norm": false,
@@ -21,9 +21,9 @@
     "policy_class": "",
     "task_name": "",
     "seed": 0,
-    "num_epochs": 0,
+    "num_epochs": 2000,
     "kl_weight": 10,
     "chunk_size": 20,
-    "temporal_agg": false,
-    "state_dim": 7
+    "temporal_agg": true,
+    "state_dim": 14
 }
