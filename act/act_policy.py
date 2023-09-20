@@ -67,3 +67,6 @@ class ACTPolicy(nn.Module):
         mean_kld = klds.mean(1).mean(0, True)
 
         return total_kld, dimension_wise_kld, mean_kld
+
+    def reset_memory(self):
+        self.model.transformer.reset_memory()

@@ -100,7 +100,9 @@ def main(args):
         print()
         exit()
 
-    train_dataloader, val_dataloader, stats, _ = load_data(
+    print("Batch size TRAIN:", batch_size_train)
+    print("Batch size VAL:", batch_size_val)
+    train_dataloader, val_dataloader, stats = load_data(
         dataset_dir, num_episodes, camera_names, batch_size_train, batch_size_val
     )
 
@@ -282,6 +284,7 @@ def eval_bc(config, ckpt_name, save_episode=True):
                 DT,
                 video_path=os.path.join(ckpt_dir, f"video{rollout_id}.mp4"),
             )
+        policy.reset_memory()
 
     success_rate = np.mean(np.array(highest_rewards) == env_max_reward)
     avg_return = np.mean(episode_returns)
@@ -304,13 +307,12 @@ def eval_bc(config, ckpt_name, save_episode=True):
     return success_rate, avg_return
 
 
-def forward_pass(data, policy):
-    image_data, qpos_data, action_data, is_pad = data
+def forward_pass(sample, policy):
     image_data, qpos_data, action_data, is_pad = (
-        image_data.cuda(),
-        qpos_data.cuda(),
-        action_data.cuda(),
-        is_pad.cuda(),
+        sample["image"].cuda(),
+        sample["qpos"].cuda(),
+        sample["action"].cuda(),
+        sample["is_pad"].cuda(),
     )
     return policy(qpos_data, image_data, action_data, is_pad)
 
@@ -331,15 +333,49 @@ def train_bc(train_dataloader, val_dataloader, config):
     validation_history = []
     min_val_loss = np.inf
     best_ckpt_info = None
-    ebar = tqdm(range(num_epochs))
+    ebar = tqdm(range(num_epochs), leave=True)
     for epoch in ebar:
+        # training
+        policy.train()
+        optimizer.zero_grad()
+        tbar = tqdm(enumerate(train_dataloader), leave=True)
+        for batch_idx, data in tbar:
+            dtbar = tqdm(data, desc=f"Batch {batch_idx}", leave=False)
+            for sample in dtbar:
+                forward_dict = forward_pass(sample, policy)
+                # backward
+                loss = forward_dict["loss"]
+                loss.backward()
+                optimizer.step()
+                optimizer.zero_grad()
+                train_history.append(detach_dict(forward_dict))
+                dtbar.set_description(f"Train loss: {loss:.5f}")
+                policy.reset_memory()
+            tbar.set_description(f"Epoch {epoch}, batch: {batch_idx}. Train loss: {loss:.5f}")
+        epoch_summary = compute_dict_mean(
+            train_history[(batch_idx + 1) * epoch : (batch_idx + 1) * (epoch + 1)]
+        )
+        epoch_train_loss = epoch_summary["loss"]
+        ebar.set_description(f"Epoch {epoch} train loss: {epoch_train_loss:.5f}")
+        summary_string = ""
+        for k, v in epoch_summary.items():
+            summary_string += f"{k}: {v.item():.3f} "
+        # print(summary_string)
+
         # validation
         with torch.inference_mode():
             policy.eval()
             epoch_dicts = []
-            for batch_idx, data in enumerate(val_dataloader):
-                forward_dict = forward_pass(data, policy)
-                epoch_dicts.append(forward_dict)
+            vbar = tqdm(enumerate(val_dataloader), leave=True)
+            for batch_idx, data in vbar:
+                dvbar = tqdm(data, leave=False)
+                for sample in dvbar:
+                    forward_dict = forward_pass(sample, policy)
+                    loss = forward_dict["loss"]
+                    epoch_dicts.append(forward_dict)
+                    dvbar.set_description(f"Val loss: {loss:.5f}")
+                    policy.reset_memory()
+                vbar.set_description(f"Epoch {epoch}, batch: {batch_idx}. Val loss: {loss:.5f}")
             epoch_summary = compute_dict_mean(epoch_dicts)
             validation_history.append(epoch_summary)
 
@@ -348,27 +384,6 @@ def train_bc(train_dataloader, val_dataloader, config):
                 min_val_loss = epoch_val_loss
                 best_ckpt_info = (epoch, min_val_loss, deepcopy(policy.state_dict()))
         ebar.set_description(f"Val loss:   {epoch_val_loss:.5f}")
-        summary_string = ""
-        for k, v in epoch_summary.items():
-            summary_string += f"{k}: {v.item():.3f} "
-        # print(summary_string)
-
-        # training
-        policy.train()
-        optimizer.zero_grad()
-        for batch_idx, data in enumerate(train_dataloader):
-            forward_dict = forward_pass(data, policy)
-            # backward
-            loss = forward_dict["loss"]
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
-            train_history.append(detach_dict(forward_dict))
-        epoch_summary = compute_dict_mean(
-            train_history[(batch_idx + 1) * epoch : (batch_idx + 1) * (epoch + 1)]
-        )
-        epoch_train_loss = epoch_summary["loss"]
-        ebar.set_description(f"Train loss: {epoch_train_loss:.5f}")
         summary_string = ""
         for k, v in epoch_summary.items():
             summary_string += f"{k}: {v.item():.3f} "

@@ -14,6 +14,8 @@ import torch
 import torch.nn.functional as F
 from torch import nn, Tensor
 
+from act.models.transformer_memory import TransformerMemory
+
 import IPython
 e = IPython.embed
 
@@ -37,6 +39,10 @@ class Transformer(nn.Module):
         self.decoder = TransformerDecoder(decoder_layer, num_decoder_layers, decoder_norm,
                                           return_intermediate=return_intermediate_dec)
 
+        memory_heads = 2  # TODO: TUNE!
+        memory_size = 20 # TODO: TUNE! -> TEMPORALLY SAME SIZE THAN TRANSFORMER OUTPUT, TO BE VERIFIED.
+        self.memory = TransformerMemory(embed_dim=d_model, num_heads=memory_heads, memory_size=memory_size)
+
         self._reset_parameters()
 
         self.d_model = d_model
@@ -46,6 +52,9 @@ class Transformer(nn.Module):
         for p in self.parameters():
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
+
+    def reset_memory(self):
+        self.memory.reset()
 
     def forward(self, src, mask, query_embed, pos_embed, latent_input=None, proprio_input=None, additional_pos_embed=None):
         if len(src.shape) == 4: # has H and W
@@ -67,6 +76,11 @@ class Transformer(nn.Module):
         addition_input = torch.stack([latent_input, proprio_input], axis=0)
         src = torch.cat([addition_input, src], axis=0)
 
+        memory_input, memory_pos_embed = self.memory.get(src + pos_embed)
+        memory_pos_embed = memory_pos_embed.unsqueeze(1).repeat(1, bs, 1) # seq, bs, dim
+        pos_embed = torch.cat([memory_pos_embed, pos_embed], axis=0)
+        src = torch.cat([memory_input, src], axis=0)
+
         memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed)
 
         query_embed = query_embed.unsqueeze(1).repeat(1, bs, 1)
@@ -74,6 +88,7 @@ class Transformer(nn.Module):
         hs = self.decoder(tgt, memory, memory_key_padding_mask=mask,
                           pos=pos_embed, query_pos=query_embed)
         hs = hs.transpose(1, 2)
+        self.memory.update(hs)
         return hs
 
 
@@ -127,18 +142,20 @@ class TransformerDecoder(nn.Module):
                            tgt_key_padding_mask=tgt_key_padding_mask,
                            memory_key_padding_mask=memory_key_padding_mask,
                            pos=pos, query_pos=query_pos)
-            if self.return_intermediate:
-                intermediate.append(self.norm(output))
+            # if self.return_intermediate: -> JUST TO CHECK
+            intermediate.append(self.norm(output))
 
         if self.norm is not None:
             output = self.norm(output)
-            if self.return_intermediate:
-                intermediate.pop()
-                intermediate.append(output)
+            # if self.return_intermediate: -> JUST TO CHECK
+            intermediate.pop()
+            intermediate.append(output)
 
+        # print("DEBUG INTERMEDIATE LEN:", len(intermediate))  # JUST TO CHECK
         if self.return_intermediate:
             return torch.stack(intermediate)
 
+        # print("DEBUG OUTPUT SHAPE:", output)
         return output.unsqueeze(0)
 
 
