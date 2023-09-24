@@ -25,5 +25,5 @@
     "kl_weight": 10,
     "chunk_size": 20,
     "temporal_agg": true,
-    "state_dim": 14
+    "state_dim": 7
 }
